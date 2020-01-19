@@ -102,3 +102,86 @@ redmine:
 ```
 cd ~/redmine && docker-compose up -d #創建
 最後，通過http://192.168.10.103:10083就可以訪問網站，可輸入系統默認用戶(用戶名：admin，密碼：admin)進行深入體驗[p.44]
+
+### Image Manage
+```
+docker images -a #查詢本機已有的所有鏡像
+docker push [IMAGENAME] #把鏡像推送到官方倉庫
+```
+* Dockerfile
+語法規則：每一行都以一個關鍵字(大寫字母)為行首，如果一行內容過長，使用`＼`把多行連接到一起
+FROM: 從哪個最底層鏡像開始創建
+MAITAINER: 指定該鏡像創建者
+ENV: 設置環境變量
+RUN: 運行shell命令，如果有多條命令可以用`&&`連接
+COPY: 將編譯機本地文件拷貝到鏡像文件系統中
+EXPOSE: 指定監聽的端口
+ENTRYPOINT: 欲執行行命令，在創建鏡像時不執行，要等到使用該鏡像創建容器，容器啟動後才執行的命令
+Example:
+```dockerfile
+# Redis Dockerfile
+# https://github.com/sameersbn/docker-redis
+#Pull base image
+FROM ubuntu:bionic-20190612
+
+LABEL maintainer="sameer@damagehead.com"
+
+ENV REDIS_VERSION=4.0.9 \
+    REDIS_USER=redis \
+    REDIS_DATA_DIR=/var/lib/redis \
+    REDIS_LOG_DIR=/var/log/redis
+# Install Redis
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server=5:${REDIS_VERSION}* \
+ && sed 's/^bind /# bind /' -i /etc/redis/redis.conf \
+ && sed 's/^logfile /# logfile /' -i /etc/redis/redis.conf \
+ && sed 's/^daemonize yes/daemonize no/' -i /etc/redis/redis.conf \
+ && sed 's/^protected-mode yes/protected-mode no/' -i /etc/redis/redis.conf \
+ && sed 's/^# unixsocket /unixsocket /' -i /etc/redis/redis.conf \
+ && sed 's/^# unixsocketperm 700/unixsocketperm 777/' -i /etc/redis/redis.conf \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh /sbin/entrypoint.sh
+RUN chmod 755 /sbin/entrypoint.sh
+# Expose ports
+EXPOSE 6379/tcp
+# Define mountable directories
+VOLUME ["${REDIS_DATA_DIR}"]
+ENTRYPOINT ["/sbin/entrypoint.sh"]
+```
+編譯生成鏡像：
+創建一個資料夾，在該資料夾目錄下放入`Dockerfile`與用到的`entrypoint.sh`。然後用`docker build`命令編譯Dockerfile，通過`-t`選項給鏡像起一個名字(:代版本號）。
+e.g.
+```
+$docker build -t image_redis:v1.0
+$docker images #查看新建的image
+```
+使用debootstrap工具，可以定製所需要的最小化的Linux基礎鏡像[p.84]
+```
+sudo apt-get install debootstrap
+sudo debootstrap --arch amd64 trusty ubuntu-trusty http://mirrors.163.com/ubuntu/
+cd ubuntu-trusty
+#修改系統時區改為東八區
+sudo cp usr/share/zoneinfo/Asia/Shanghai ect/localtime
+＃提交生成基礎鏡像，名字為ubuntu1404-baseimage:1.0
+cd ubuntu-trusty
+sudo tar -c .|docker import - ubuntu1404-baseimage:1.0
+#新創一個容器，查看Ubuntu的系統版本和時區修改是否成功
+$docker run -t -i ubuntu1404-baseimage:1.0 /bin/bash
+root@c09ba1a54004:/# cat /etc/issue
+```
+### Respository Manage
+```
+docker search pytorch #搜索pytorch鏡像
+docker pull tensorflow #下載tensorflow鏡像
+docker run -p 5000:5000 registry #從Docker Hub拉取docker-register的鏡像，然後啟動docker-register服務，docker-register默認監聽5000端口[p.89]
+```
+### NetWork and Memory Manage
+很多時候，我們會將一些相關的容器部屬在同一個Host上，並希望這些容器可以共享數據，通過`--volumes-from`在其他容器掛載某個容器的數據
+e.g.
+```
+docker run -d -v /dbdata --name dbdata training/postgres echo Data-only
+docker run -d --volumes-from dbdata --name db1 training/postgres #db1能看見容器dbdata所有數據的內容。[p.105]
+#備份、恢復和遷移數據[p.107]
+docker run --volumes-from dbdata -v $(pwd):/backup ubuntu tar cvf /backup/backup.tar /dbdata #這裡我們創建一個新容器，將Host本地目錄掛載到/backup，然後將數據卷容器dbdata的數據(/dbdata)打包到/backup/backup.tar。然後在Host的當前目錄下就可以得到backup.tar
+```
